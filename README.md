@@ -20,7 +20,7 @@ Any OPT marked above as yes is set by default in the container, to override use 
 ## Getting Running
 
 To get started this is the minimum number of options assuming you have. This assumes you LAN is BR0 (VLAN null / 1) and your IoT network is VLAN #50
-`docker run --network=host --restart=always --name ssdp-relay scyto/multicast-proxy`
+`docker run --network=host --restart=always --name ssdp-relay scyto/multicast-relay`
 
 For testing use this to see console output
 `docker run --rm -it --restart=always --network=host  -e OPTS="--verbose" -e INTERFACES="br0 br50"    scyto/multicast-relay`
