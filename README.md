@@ -14,21 +14,26 @@ This is a docker container that implements <https://github.com/alsmith/multicast
 |                      |     no           | --noMDNS (disables mDNS relaying, e.g. if you are using the unifi one disable this)          |
 |                      |     no           | -- noSSDP disables SSDP relaying. (disables SSDP, but not sure why you would want to )                                                                               |
 |                      |     no           | --noSonosDiscovery (disables broadcast udp/6969 relaying)                                                                             |
+|                      |                     | for full list of options see <https://github.com/alsmith/multicast-relay> | 
 
 Any OPT marked above as yes is set by default in the container, to override use the docker run option `-e OPTS="your options"` or -e `OPTS=""`
 
 ## Getting Running
 
 To get started this is the minimum number of options assuming you have. This assumes you LAN is BR0 (VLAN null / 1) and your IoT network is VLAN #50
+
 `docker run --network=host --restart=always --name ssdp-relay scyto/multicast-relay`
 
 For testing use this to see console output
+
 `docker run --rm -it --restart=always --network=host  -e OPTS="--verbose" -e INTERFACES="br0 br50"    scyto/multicast-relay`
 
 ## More than LAN and 1 VLAN
 
 To run on multiple vlans and have more detailed info and turn off mDNS so you can use the unifi provided one. For example this forwards just SSDP but not mDNS between LAN, VLAN50 and VLAN60:
+
 `docker run --network=host --name ssdp-relay --restart=always -e INTERFACES="br0 br50 br60" -e OPTS="--verbose --noMDNS" scyto/multicast-relay`
 
 If you use LAN as your management VLAN (aka no VLAN / VLAN1) then your command needs to look something like this where  N is each VLAN number
+
 `docker run --network=host --name ssdp-relay --restart=always -e INTERFACES="br10 br75 br90 [etc] " scyto/multicast-relay`
