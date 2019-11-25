@@ -14,7 +14,7 @@ This is a docker container that implements <https://github.com/alsmith/multicast
 |                      |     no           | --noMDNS (disables mDNS relaying, e.g. if you are using the unifi one disable this)          |
 |                      |     no           | -- noSSDP disables SSDP relaying. (disables SSDP, but not sure why you would want to )                                                                               |
 |                      |     no           | --noSonosDiscovery (disables broadcast udp/6969 relaying)                                                                             |
-|                      |                     | for full list of options see <https://github.com/alsmith/multicast-relay> | 
+|                      |                     | for full list of options see <https://github.com/alsmith/multicast-relay> |
 
 Any OPT marked above as yes is set by default in the container, to override use the docker run option `-e OPTS="your options"` or -e `OPTS=""`
 
