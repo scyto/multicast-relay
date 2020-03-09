@@ -26,7 +26,7 @@ To get started this is the minimum number of options assuming you have. This ass
 
 For testing use this to see console output
 
-`docker run --rm -it --restart=always --network=host  -e OPTS="--verbose" -e INTERFACES="br0 br50"    scyto/multicast-relay`
+`docker run --rm -it --network=host  -e OPTS="--verbose" -e INTERFACES="br0 br50"    scyto/multicast-relay`
 
 ## More than LAN and 1 VLAN
 
