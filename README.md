@@ -37,3 +37,6 @@ To run on multiple vlans and have more detailed info and turn off mDNS so you ca
 If you use LAN as your management VLAN (aka no VLAN / VLAN1) then your command needs to look something like this where  N is each VLAN number
 
 `docker run --network=host --name ssdp-relay --restart=always -e INTERFACES="br10 br75 br90 [etc] " scyto/multicast-relay`
+
+## Firewall Notes
+Please note that even when your devices have discovered one another, at least in the Sonos case, a unicast connection will be established from the speakers back to the controlling client running the Sonos app. You will need to make sure that that no firewalling is in place that would prevent connections being established from the SONOS VLAN to the client device VLAN.
