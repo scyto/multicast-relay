@@ -7,7 +7,7 @@ COPY start.sh /start.sh
 # Install any needed packages
 
 RUN apk update \
-  && apk add --no-cache python2 py-netifaces git \
+  && apk add --no-cache python3 py-netifaces git \
   && git clone --depth 1 https://github.com/alsmith/multicast-relay \
   && apk del git 
 
