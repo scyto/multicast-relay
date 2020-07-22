@@ -8,7 +8,7 @@ COPY start.sh /start.sh
 
 RUN apk update \
   && apk add --no-cache python3 py-netifaces git \
-  && git clone --depth 1 https://github.com/alsmith/multicast-relay \
+  && git clone --depth 1 -b fixBroadcast https://github.com/alsmith/multicast-relay.git \
   && apk del git 
 
 # Define environment variable
