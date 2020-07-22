@@ -20,6 +20,8 @@ Any OPT marked above as yes is set by default in the container, to override use 
 
 ## Getting Running
 
+** NOTE if you are running this on unifios you will need to use the podman command instead of the docker command **
+
 To get started this is the minimum number of options assuming you have. This assumes you LAN is BR0 (VLAN null / 1) and your IoT network is VLAN #50
 
 `docker run --network=host --restart=always --name ssdp-relay scyto/multicast-relay`
