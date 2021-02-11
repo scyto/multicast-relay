@@ -1,10 +1,6 @@
 # multicast-relay docker for Unifi Dream Machine
 
-<<<<<<< HEAD
 This is a docker container that implements <https://github.com/alsmith/multicast-relay> to provide mDNS and SSDP on a unfi dream machine.  It will likely work on any multi homed host.  This container runs v1.3.
-=======
-This is a docker container that implements <https://github.com/alsmith/multicast-relay> to provide mDNS and SSDP on a unfi dream machine.  It will likely work on any multi homed host. This runs release v1.3 of multicast-relay.
->>>>>>> 53831a32a13cdb125d31fbed85454defb3e392cc
 
 ## Required Environment Variables
 
