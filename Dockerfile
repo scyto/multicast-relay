@@ -18,7 +18,7 @@ ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV LANG C.UTF-8
 ENV TZ America/Los_Angeles
 ENV INTERFACES br0 br50
-ENV OPTS "--verbose"
+
 
 # Run  when the container launches
 # ENTRYPOINT ["./start.sh"]
