@@ -42,3 +42,7 @@ If you use LAN as your management VLAN (aka no VLAN / VLAN1) then your command n
 
 ## Firewall Notes
 Please note that even when your devices have discovered one another, at least in the Sonos case, a unicast connection will be established from the speakers back to the controlling client running the Sonos app. You will need to make sure that that no firewalling is in place that would prevent connections being established from the SONOS VLAN to the client device VLAN.
+
+E.G. To allow chromecast through the firewall on a vm(photon 4), do not forget to save iptables after everything is working:
+
+`sudo iptables -I INPUT -m pkttype --pkt-type multicast -j ACCEPT`
