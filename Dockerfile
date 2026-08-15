@@ -7,7 +7,7 @@ COPY start.sh /start.sh
 # Install any needed packages
 
 RUN apk update \
-  && apk add --no-cache python3 py-netifaces git \
+  && apk add --no-cache python3 py-netifaces git tzdata \
   && git clone --depth 1 https://github.com/alsmith/multicast-relay.git \
   && apk del git 
 # use b fixBroadcast option before URL to download specific sub branch
