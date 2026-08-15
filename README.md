@@ -19,11 +19,30 @@ docker pull scyto/multicast-relay:latest
 
 ### Tags
 
+Tags fall into two groups, and the difference matters if you care about reproducibility.
+
+**Immutable** — published once and never repointed. CI fails the build rather than overwrite one:
+
 | Tag | Meaning |
 |---|---|
-| `latest` | Newest build from `master`. What you get if you don't specify a tag. |
-| `1.2.3`, `1.2`, `1` | Released versions, from a `v1.2.3` git tag. Use these if you want to pin. |
-| `master-<sha>` | One exact build from `master`, for pinning to a known-good image. |
+| `1.2.3` | One exact release. Always the same image. |
+| `master-<sha>` | One exact build of one commit on `master`. |
+
+**Moving** — pointers that are meant to be reassigned:
+
+| Tag | Meaning |
+|---|---|
+| `latest` | The newest **release**. Only a `v*` git tag moves it — merging to `master` does not. |
+| `1.2` / `1` | Newest patch in that series, so you get fixes automatically. |
+| `edge` | Newest build from `master`. Untagged code; expect it to change under you. |
+
+If you just want a working relay, use `latest`. If you want to know exactly what you are running, pin `1.2.3` — or pin the digest, which is immutable even against tag deletion:
+
+```bash
+docker pull ghcr.io/scyto/multicast-relay@sha256:<digest>
+```
+
+Every release records its digest in the [release notes](https://github.com/scyto/multicast-relay/releases).
 
 Platforms: `linux/amd64`, `linux/arm64`, `linux/arm/v7`, `linux/arm/v6`.
 
@@ -114,7 +133,10 @@ sudo iptables -I INPUT -m pkttype --pkt-type multicast -j ACCEPT
 - **Minimal runtime.** A multi-stage build keeps `git`, `curl` and `ca-certificates` out of the shipped image; only `python3`, `py3-netifaces` and `tzdata` remain. CI fails the build if a build tool reappears in the runtime image.
 - **No setuid binaries.** Every setuid/setgid bit is stripped, and CI asserts none come back. This matters because the container runs on the host network namespace.
 - **Runs on one capability.** Verified in CI to work with `--cap-drop=ALL --cap-add=NET_RAW`, `--security-opt no-new-privileges` and a read-only root filesystem.
+- **Immutable release tags.** Neither registry enforces tag immutability on these plans, so CI does: a build that would overwrite an existing `X.Y.Z` or `master-<sha>` tag fails before pushing. What `1.2.3` means cannot change after the fact.
 - **Vulnerability scanned.** Every build is scanned with Trivy and fails on fixable HIGH/CRITICAL findings.
+- **Protected default branch.** `master` requires a pull request and blocks force-pushes and deletion, so nothing reaches a published image without passing CI first.
+- **Dependency updates.** Dependabot raises weekly PRs for GitHub Actions and for the pinned Alpine base, so digest pinning cannot quietly turn into staying unpatched.
 - **Signed provenance and SBOM.** Images ship an SBOM and SLSA build provenance attestation. Verify a pull with:
   ```bash
   gh attestation verify oci://ghcr.io/scyto/multicast-relay:latest --repo scyto/multicast-relay
@@ -129,9 +151,19 @@ Images are built and published by GitHub Actions:
 |---|---|---|
 | [`build.yml`](.github/workflows/build.yml) | push to `master`, `v*.*.*` tags, PRs, manual | Builds, smoke-tests, scans, then publishes the multi-arch image to GHCR and Docker Hub. PRs build and test but never push. |
 | [`lint.yml`](.github/workflows/lint.yml) | push / PR touching build files | hadolint, shellcheck, actionlint, and a check that `tracked-versions.json` agrees with the Dockerfile. |
-| [`check-upstream.yml`](.github/workflows/check-upstream.yml) | daily 06:00 UTC, manual | Polls upstream for new commits; re-pins, recomputes checksums, commits and triggers a build. |
+| [`check-upstream.yml`](.github/workflows/check-upstream.yml) | daily 06:00 UTC, manual | Polls upstream for new commits; re-pins, recomputes checksums, commits and triggers a build. Only moves `:edge`, never `:latest`. |
 
-The smoke test does not merely start the container — it asserts all four relays come up, that effective capabilities are exactly `CAP_NET_RAW`, that PID 1 is python, that the healthcheck passes, and that SIGTERM is honoured.
+The smoke test does not merely start the container — it asserts all four relays come up, that effective capabilities are exactly `CAP_NET_RAW`, that `tini` is PID 1 with the relay as its child, that the healthcheck passes, and that the container exits 143 (SIGTERM honoured) rather than 137 (SIGKILL after timeout).
+
+### Cutting a release
+
+`master` builds only ever move `:edge`. To publish a release and move `:latest`:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+That builds and publishes `:1.2.3`, `:1.2`, `:1` and `:latest`, then creates a GitHub release recording the image digest. Re-tagging an already published version is refused by the immutability check — cut a new patch version instead.
 
 ### What is pinned
 

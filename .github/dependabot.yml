@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # The Alpine base is digest-pinned, which is good for reproducibility and bad
+  # for staying patched — nothing moves it without a deliberate bump. Dependabot
+  # raises that bump as a PR, where the smoke test and Trivy scan gate it.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
