@@ -324,6 +324,31 @@ jobs:
       # Only genuinely fixed tags are guarded. :latest, :edge, :X.Y and :X are
       # moving pointers by design — reassigning those is the intended workflow.
       # ---------------------------------------------------------------------
+      # The immutability guard below deliberately ignores moving tags, which
+      # leaves :latest unguarded — and :latest is the one tag that reaches every
+      # existing puller. Its semantics depend on metadata-action's latest=auto
+      # behaviour, so assert the outcome rather than trusting the action to keep
+      # behaving this way across major version bumps.
+      - name: Assert :latest only moves on a release tag
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          if [ "$IS_TAG" = "true" ]; then
+            grep -q ':latest$' <<<"$TAGS" || {
+              echo "::error title=tags::release build derived no :latest tag; existing pullers would not receive this release" >&2
+              exit 1
+            }
+            echo "ok: release build moves :latest"
+          else
+            if grep -q ':latest$' <<<"$TAGS"; then
+              echo "::error title=tags::non-release build would move :latest. Only a v* tag may do that — this would push untested code to every existing puller." >&2
+              grep ':latest$' <<<"$TAGS" >&2
+              exit 1
+            fi
+            echo "ok: non-release build leaves :latest untouched"
+          fi
+
       - name: Enforce tag immutability
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
