@@ -1,0 +1,339 @@
+name: Build and publish image
+
+# Publishes the multi-arch image to GHCR (primary) and Docker Hub (kept alive
+# so existing `docker pull scyto/multicast-relay` users keep receiving updates).
+#
+# Pull requests build and smoke-test but never push, so a fork PR cannot
+# publish an image.
+
+on:
+  push:
+    branches: [master]
+    # Semver tags drive the :X.Y.Z / :X.Y / :X image tags.
+    tags:
+      - 'v*.*.*'
+    # Deliberately no paths-ignore here. GitHub applies path filters to tag
+    # pushes as well, so a release tag landing on a docs-only commit would be
+    # silently skipped and never publish its image. A redundant rebuild on a
+    # README push is cheap (the layer cache makes it a no-op); a missing
+    # release build is not.
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+  DOCKERHUB_IMAGE: docker.io/${{ github.repository }}
+  PLATFORMS: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build a single-arch image first and prove it actually relays before any
+  # multi-arch push happens. Publishing an image that cannot start is the
+  # failure mode most worth preventing here.
+  # ---------------------------------------------------------------------------
+  smoke-test:
+    name: Build and smoke-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Read tracked versions
+        id: tracked
+        run: |
+          jq -r '
+            "upstream_repo=\(.upstream.repo)",
+            "upstream_ref=\(.upstream.ref)",
+            "relay_sha256=\(.upstream.files["multicast-relay.py"])",
+            "ssdp_sha256=\(.upstream.files["ssdpDiscover.py"])"
+          ' .github/tracked-versions.json >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build amd64 image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: multicast-relay:ci
+          build-args: |
+            UPSTREAM_REPO=${{ steps.tracked.outputs.upstream_repo }}
+            UPSTREAM_REF=${{ steps.tracked.outputs.upstream_ref }}
+            RELAY_SHA256=${{ steps.tracked.outputs.relay_sha256 }}
+            SSDPDISCOVER_SHA256=${{ steps.tracked.outputs.ssdp_sha256 }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Reject misconfiguration with a clear error
+        run: |
+          # An interface that does not exist must fail fast and explain itself,
+          # rather than surfacing as a bare netifaces traceback.
+          if out=$(docker run --rm -e INTERFACES=nope0 multicast-relay:ci 2>&1); then
+            echo "::error title=smoke::container started with a nonexistent interface" >&2
+            exit 1
+          fi
+          grep -q 'not visible to this container' <<<"$out" || {
+            echo "::error title=smoke::unhelpful error for a bad interface:" >&2
+            echo "$out" >&2
+            exit 1
+          }
+          echo "ok: bad interface rejected cleanly"
+
+      - name: Relay starts under fully hardened runtime flags
+        run: |
+          # These are exactly the flags the README tells users to run with, so
+          # if hardening ever breaks the relay, CI finds out and not the user.
+          docker run -d --name relay --network=host \
+            --cap-drop=ALL --cap-add=NET_RAW \
+            --security-opt no-new-privileges \
+            --read-only --tmpfs /tmp \
+            -e INTERFACES="eth0 docker0" -e OPTS="--verbose" \
+            multicast-relay:ci
+          sleep 10
+          docker logs relay
+
+          [ "$(docker inspect -f '{{.State.Status}}' relay)" = "running" ] || {
+            echo "::error title=smoke::container is not running" >&2
+            docker logs relay >&2
+            exit 1
+          }
+
+          # All four relays must come up, not just the process.
+          for expect in \
+            'multicast relay for 224.0.0.251:5353' \
+            'multicast relay for 239.255.255.250:1900' \
+            'broadcast relay for 255.255.255.255:1900' \
+            'broadcast relay for 255.255.255.255:6969'
+          do
+            if docker logs relay 2>&1 | grep -qF "$expect"; then
+              echo "  ok: $expect"
+            else
+              echo "::error title=smoke::relay never announced: $expect" >&2
+              exit 1
+            fi
+          done
+
+          # Exactly CAP_NET_RAW (bit 13) and nothing else.
+          capeff=$(docker exec relay awk '/^CapEff/{print $2}' /proc/1/status)
+          [ "$capeff" = "0000000000002000" ] || {
+            echo "::error title=smoke::expected CapEff 0000000000002000 (NET_RAW), got ${capeff}" >&2
+            exit 1
+          }
+          echo "ok: capabilities reduced to NET_RAW only"
+
+          # PID 1 must be python, or SIGTERM gets swallowed by a shell.
+          comm=$(docker exec relay cat /proc/1/comm)
+          [ "$comm" = "python3" ] || {
+            echo "::error title=smoke::PID 1 is '${comm}', expected python3" >&2
+            exit 1
+          }
+
+          docker exec relay /healthcheck.sh || {
+            echo "::error title=smoke::healthcheck failed while relay was up" >&2
+            exit 1
+          }
+          echo "ok: healthcheck passes"
+
+          # SIGTERM must reach python. A shell PID 1 would push this to ~10s.
+          start=$(date +%s)
+          docker stop relay >/dev/null
+          elapsed=$(( $(date +%s) - start ))
+          echo "container stopped in ${elapsed}s"
+          [ "$elapsed" -lt 5 ] || {
+            echo "::error title=smoke::SIGTERM not honoured (${elapsed}s); PID 1 is swallowing signals" >&2
+            exit 1
+          }
+          docker rm -f relay >/dev/null 2>&1 || true
+
+      - name: No setuid/setgid binaries survive in the image
+        run: |
+          found=$(docker run --rm --entrypoint sh multicast-relay:ci \
+            -c 'find / -xdev -type f -perm /6000 2>/dev/null' || true)
+          if [ -n "$found" ]; then
+            echo "::error title=smoke::setuid/setgid binaries present:" >&2
+            echo "$found" >&2
+            exit 1
+          fi
+          echo "ok: no setuid/setgid binaries"
+
+      - name: Build toolchain absent from runtime image
+        run: |
+          # git/curl belong to the fetch stage only. Their presence would mean
+          # the multi-stage split silently regressed.
+          for bin in git curl; do
+            if docker run --rm --entrypoint sh multicast-relay:ci \
+                 -c "command -v $bin" >/dev/null 2>&1; then
+              echo "::error title=smoke::${bin} leaked into the runtime image" >&2
+              exit 1
+            fi
+            echo "  ok: ${bin} not in runtime image"
+          done
+
+      - name: Scan image for known vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: multicast-relay:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+  # ---------------------------------------------------------------------------
+  # Multi-arch build and push. Only runs once the smoke test has passed, and
+  # never for pull requests.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish multi-arch image
+    needs: smoke-test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write      # provenance attestation
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Read tracked versions
+        id: tracked
+        run: |
+          jq -r '
+            "upstream_repo=\(.upstream.repo)",
+            "upstream_ref=\(.upstream.ref)",
+            "relay_sha256=\(.upstream.files["multicast-relay.py"])",
+            "ssdp_sha256=\(.upstream.files["ssdpDiscover.py"])"
+          ' .github/tracked-versions.json >> "$GITHUB_OUTPUT"
+
+      # Docker Hub is best-effort: if the secrets are not configured the build
+      # still publishes to GHCR rather than failing the whole pipeline.
+      - name: Detect Docker Hub credentials
+        id: dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "${DOCKERHUB_USERNAME}" ] && [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Docker Hub push enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=dockerhub::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set — publishing to GHCR only. Existing Docker Hub users will not receive this build."
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            name=${{ env.DOCKERHUB_IMAGE }},enable=${{ steps.dockerhub.outputs.enabled == 'true' }}
+          tags: |
+            # master -> :latest, preserving what existing pullers already track.
+            type=raw,value=latest,enable={{is_default_branch}}
+            # master -> :master-<short sha>, so a specific build can be pinned.
+            type=sha,prefix=master-,enable={{is_default_branch}}
+            # v1.2.3 -> :1.2.3, :1.2, :1
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=multicast-relay
+            org.opencontainers.image.description=mDNS/SSDP multicast relay for multi-homed hosts (UniFi Dream Machine and friends)
+            org.opencontainers.image.licenses=GPL-2.0-or-later
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            UPSTREAM_REPO=${{ steps.tracked.outputs.upstream_repo }}
+            UPSTREAM_REF=${{ steps.tracked.outputs.upstream_ref }}
+            RELAY_SHA256=${{ steps.tracked.outputs.relay_sha256 }}
+            SSDPDISCOVER_SHA256=${{ steps.tracked.outputs.ssdp_sha256 }}
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Ship an SBOM and SLSA provenance with the image so consumers can
+          # see exactly what is inside it and which workflow produced it.
+          sbom: true
+          provenance: mode=max
+
+      - name: Attest build provenance (GHCR)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summarise published image
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          DOCKERHUB: ${{ steps.dockerhub.outputs.enabled }}
+        run: |
+          {
+            echo "### Published image"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Platforms | \`${PLATFORMS}\` |"
+            echo "| Docker Hub mirrored | \`${DOCKERHUB}\` |"
+            echo
+            echo "**Tags**"
+            echo '```'
+            echo "${TAGS}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

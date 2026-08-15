@@ -1,0 +1,6 @@
+# Only start.sh and healthcheck.sh are needed in the build context; everything
+# else would just invalidate the layer cache (and .git would leak history into
+# the context on every build).
+*
+!start.sh
+!healthcheck.sh

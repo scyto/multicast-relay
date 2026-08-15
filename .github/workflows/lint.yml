@@ -1,0 +1,106 @@
+name: Lint
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '**.sh'
+      - '.github/workflows/**.yml'
+      - '.github/tracked-versions.json'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '**.sh'
+      - '.github/workflows/**.yml'
+      - '.github/tracked-versions.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  hadolint:
+    name: hadolint Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hadolint/hadolint-action@v3.4.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  shellcheck:
+    name: shellcheck shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run shellcheck
+        run: shellcheck --severity=warning ./*.sh
+
+  actionlint:
+    name: actionlint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download actionlint
+        # Pinned download script from upstream. actionlint auto-runs shellcheck
+        # against `run:` blocks when shellcheck is on PATH (ubuntu-latest
+        # preinstalls it), so this also covers build.yml's inline shell, which
+        # the standalone shellcheck job does not see.
+        run: bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+      - name: Run actionlint
+        run: ./actionlint -color -shellcheck "shellcheck --severity=warning"
+
+  tracked-versions:
+    name: tracked-versions.json matches Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate shape and Dockerfile agreement
+        run: |
+          f=.github/tracked-versions.json
+          jq -e . "$f" >/dev/null || { echo "::error::${f} is not valid JSON"; exit 1; }
+
+          fail=0
+          for path in .upstream.repo .upstream.branch .upstream.ref \
+                      .base.image .base.tag .base.digest; do
+            if [ "$(jq -r "${path} // empty" "$f")" = "" ]; then
+              echo "::error title=tracked-versions::${path} is missing or empty"
+              fail=1
+            fi
+          done
+
+          ref=$(jq -r '.upstream.ref' "$f")
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error title=tracked-versions::upstream.ref must be a full 40-char commit SHA, got '${ref}'"
+            fail=1
+          }
+
+          for file in multicast-relay.py ssdpDiscover.py; do
+            sum=$(jq -r --arg f "$file" '.upstream.files[$f] // empty' "$f")
+            [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+              echo "::error title=tracked-versions::checksum for ${file} is missing or malformed"
+              fail=1
+            }
+          done
+
+          # The Dockerfile ARG defaults are what a plain `docker build` uses, so
+          # they must not drift from the tracked values CI passes in.
+          dockerfile_ref=$(grep -oP '^ARG UPSTREAM_REF=\K\S+' Dockerfile | head -1)
+          if [ "$dockerfile_ref" != "$ref" ]; then
+            echo "::error title=tracked-versions::Dockerfile UPSTREAM_REF (${dockerfile_ref}) != tracked ref (${ref})"
+            fail=1
+          fi
+
+          digest=$(jq -r '.base.digest' "$f")
+          grep -q "$digest" Dockerfile || {
+            echo "::error title=tracked-versions::Dockerfile does not pin base digest ${digest}"
+            fail=1
+          }
+
+          exit $fail

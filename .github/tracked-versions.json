@@ -1,0 +1,17 @@
+{
+  "_comment": "Single source of truth for what this image is built from. Bumped automatically by .github/workflows/check-upstream.yml and consumed as build args by .github/workflows/build.yml. Keep in sync with the ARG defaults in the Dockerfile.",
+  "upstream": {
+    "repo": "alsmith/multicast-relay",
+    "branch": "master",
+    "ref": "461d1c97f3aaf0ab9f8996e1a8f24c6b8204d6b4",
+    "files": {
+      "multicast-relay.py": "60bc9c3a96d980c0e8df7c677bf6c70dd66bce9276a708f20a8ee074a82af786",
+      "ssdpDiscover.py": "57c0d95dce2675d78f2208c77706a7c045364466491998c1a9e30d07c94ef78d"
+    }
+  },
+  "base": {
+    "image": "alpine",
+    "tag": "3.24.1",
+    "digest": "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
+  }
+}
