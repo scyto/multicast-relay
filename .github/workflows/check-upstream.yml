@@ -1,8 +1,8 @@
 name: Check for upstream changes
 
 # Polls alsmith/multicast-relay for new commits on its tracked branch. When the
-# pinned commit moves, this re-pins it, recomputes the source checksums, commits
-# the result and dispatches a build.
+# pinned commit moves, this re-pins it, recomputes the source checksums and
+# opens a pull request with the bump, then dispatches the checks against it.
 #
 # This is what keeps the pin from going stale: the image is reproducible because
 # the commit is pinned, and it stays current because this job bumps the pin
@@ -14,8 +14,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  actions: write
+  contents: write        # push the bump branch
+  pull-requests: write   # open the PR
+  actions: write         # dispatch checks against the bump branch
 
 # Serialise manual dispatches against the scheduled run so two invocations
 # cannot race on the commit/push of tracked-versions.json.
@@ -89,37 +90,67 @@ jobs:
             echo "repo=${REPO}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Commit and push the bump
+      # A bump pulls new third-party code into the image, which is exactly the
+      # kind of change that deserves a human glance rather than landing straight
+      # on master. It also has to be a PR: master's ruleset requires one, and a
+      # user-owned repo cannot grant the Actions bot a bypass the way an org can.
+      - name: Open a pull request for the bump
         if: steps.check.outputs.changed == '1'
+        id: pr
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ steps.check.outputs.repo }}
           CURRENT: ${{ steps.check.outputs.current }}
           LATEST: ${{ steps.check.outputs.latest }}
         run: |
+          branch="upstream-bump/${LATEST:0:12}"
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+
+          # An open PR for this exact commit already covers it.
+          if gh pr list --head "$branch" --state open --json number \
+               --jq 'length' | grep -qv '^0$'; then
+            echo "PR for ${branch} already open, nothing to do"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
           git add .github/tracked-versions.json Dockerfile
           git commit -m "Bump ${REPO} pin to ${LATEST:0:12}
 
           Upstream moved ${CURRENT:0:12} -> ${LATEST:0:12}.
           Source checksums recomputed at the new commit."
-          # Retry once: if master moved between checkout and now, rebase on top.
-          if ! git push; then
-            echo "Push rejected, rebasing and retrying..."
-            git pull --rebase
-            git push
-          fi
+          git push --force-with-lease origin "$branch"
 
-      - name: Trigger a build of the new pin
-        if: steps.check.outputs.changed == '1'
+          gh pr create \
+            --base master --head "$branch" \
+            --title "Bump ${REPO} pin to ${LATEST:0:12}" \
+            --body "$(printf '%s\n' \
+              "Upstream \`${REPO}\` moved \`${CURRENT}\` -> \`${LATEST}\`." \
+              "" \
+              "Source checksums in \`tracked-versions.json\` were recomputed at the new commit, and the Dockerfile \`ARG\` default was re-pinned to match." \
+              "" \
+              "Review the upstream diff before merging:" \
+              "https://github.com/${REPO}/compare/${CURRENT}...${LATEST}" \
+              "" \
+              "Merging moves \`:edge\` only. \`:latest\` does not move until a \`v*\` tag is cut.")"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      # GITHUB_TOKEN-authored PRs deliberately do not trigger workflows, so the
+      # checks would never run on their own. Dispatch them explicitly against
+      # the bump branch. build.yml's publish job is branch-guarded, so this
+      # smoke-tests and scans the bump without publishing anything.
+      - name: Run checks against the bump branch
+        if: steps.check.outputs.changed == '1' && steps.pr.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
         run: |
-          # The push above is made with GITHUB_TOKEN, which deliberately does not
-          # retrigger workflows (GitHub's recursion guard), so dispatch build.yml
-          # explicitly.
-          gh workflow run build.yml --ref master
-          echo "Dispatched build.yml for the bumped upstream pin"
+          gh workflow run build.yml --ref "$BRANCH"
+          gh workflow run lint.yml  --ref "$BRANCH"
+          echo "Dispatched build.yml and lint.yml against ${BRANCH}"
 
       - name: Report
         env:
@@ -128,8 +159,8 @@ jobs:
           LATEST: ${{ steps.check.outputs.latest }}
         run: |
           if [ "$CHANGED" = "1" ]; then
-            echo "### Upstream pin bumped" >> "$GITHUB_STEP_SUMMARY"
-            echo "\`${CURRENT}\` → \`${LATEST}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Upstream pin bump proposed" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`${CURRENT}\` → \`${LATEST}\` — raised as a pull request for review." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "### Upstream unchanged" >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -215,7 +215,14 @@ jobs:
   publish:
     name: Publish multi-arch image
     needs: smoke-test
-    if: github.event_name != 'pull_request'
+    # Never on a PR, and never on a branch other than master. The branch guard
+    # matters because check-upstream dispatches this workflow against its bump
+    # branch to get the bump smoke-tested — that run must validate, not publish.
+    # (A non-master, non-tag build also derives no tags at all, since every tag
+    # rule is gated on is_default_branch or a semver tag.)
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

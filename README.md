@@ -151,7 +151,7 @@ Images are built and published by GitHub Actions:
 |---|---|---|
 | [`build.yml`](.github/workflows/build.yml) | push to `master`, `v*.*.*` tags, PRs, manual | Builds, smoke-tests, scans, then publishes the multi-arch image to GHCR and Docker Hub. PRs build and test but never push. |
 | [`lint.yml`](.github/workflows/lint.yml) | push / PR touching build files | hadolint, shellcheck, actionlint, and a check that `tracked-versions.json` agrees with the Dockerfile. |
-| [`check-upstream.yml`](.github/workflows/check-upstream.yml) | daily 06:00 UTC, manual | Polls upstream for new commits; re-pins, recomputes checksums, commits and triggers a build. Only moves `:edge`, never `:latest`. |
+| [`check-upstream.yml`](.github/workflows/check-upstream.yml) | daily 06:00 UTC, manual | Polls upstream for new commits; re-pins, recomputes checksums and opens a PR with the bump for review. Merging it moves `:edge` only, never `:latest`. |
 
 The smoke test does not merely start the container — it asserts all four relays come up, that effective capabilities are exactly `CAP_NET_RAW`, that `tini` is PID 1 with the relay as its child, that the healthcheck passes, and that the container exits 143 (SIGTERM honoured) rather than 137 (SIGKILL after timeout).
 
