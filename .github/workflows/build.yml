@@ -139,12 +139,19 @@ jobs:
           }
           echo "ok: capabilities reduced to NET_RAW only"
 
-          # PID 1 must be python, or SIGTERM gets swallowed by a shell.
+          # PID 1 must be tini. The kernel discards default-disposition signals
+          # aimed at PID 1, so if python ends up there instead it silently
+          # ignores SIGTERM and every `docker stop` takes the full timeout.
           comm=$(docker exec relay cat /proc/1/comm)
-          [ "$comm" = "python3" ] || {
-            echo "::error title=smoke::PID 1 is '${comm}', expected python3" >&2
+          [ "$comm" = "tini" ] || {
+            echo "::error title=smoke::PID 1 is '${comm}', expected tini" >&2
             exit 1
           }
+          docker exec relay pgrep -f 'multicast-relay\.py' >/dev/null || {
+            echo "::error title=smoke::relay process not running under tini" >&2
+            exit 1
+          }
+          echo "ok: tini is PID 1 with the relay as its child"
 
           docker exec relay /healthcheck.sh || {
             echo "::error title=smoke::healthcheck failed while relay was up" >&2
@@ -152,15 +159,20 @@ jobs:
           }
           echo "ok: healthcheck passes"
 
-          # SIGTERM must reach python. A shell PID 1 would push this to ~10s.
+          # Assert on the exit code, not the wall clock. `docker stop` can
+          # return before the container is truly reaped, so timing reads as
+          # fast even when SIGTERM was ignored and SIGKILL did the work.
+          # 143 = 128+SIGTERM (honoured). 137 = 128+SIGKILL (timed out).
           start=$(date +%s)
           docker stop relay >/dev/null
           elapsed=$(( $(date +%s) - start ))
-          echo "container stopped in ${elapsed}s"
-          [ "$elapsed" -lt 5 ] || {
-            echo "::error title=smoke::SIGTERM not honoured (${elapsed}s); PID 1 is swallowing signals" >&2
+          code=$(docker inspect -f '{{.State.ExitCode}}' relay)
+          echo "container stopped in ${elapsed}s with exit code ${code}"
+          [ "$code" = "143" ] || {
+            echo "::error title=smoke::expected exit 143 (SIGTERM honoured), got ${code}. 137 means SIGTERM was ignored and docker had to SIGKILL after the stop timeout." >&2
             exit 1
           }
+          echo "ok: SIGTERM honoured"
           docker rm -f relay >/dev/null 2>&1 || true
 
       - name: No setuid/setgid binaries survive in the image

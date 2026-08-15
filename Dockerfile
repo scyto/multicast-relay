@@ -75,9 +75,17 @@ LABEL org.opencontainers.image.title="multicast-relay" \
 # python3 + netifaces are all the relay needs at runtime; tzdata makes $TZ
 # resolve so log timestamps are local. `py-netifaces` (used previously) is a
 # stale alias — the real package is py3-netifaces.
+#
+# tini is what makes `docker stop` work. The kernel discards signals with a
+# default disposition when they are aimed at PID 1, so whatever runs as PID 1
+# must install its own handler — and multicast-relay.py installs none. Left to
+# itself the relay therefore ignores SIGTERM and is SIGKILLed once the stop
+# timeout expires (exit 137). tini takes PID 1, forwards SIGTERM to the relay
+# as a normal child where the default disposition does apply, and reaps
+# orphans. Confirmed by CI asserting exit code 143, not 137.
 # hadolint ignore=DL3018
 RUN set -eux; \
-    apk add --no-cache python3 py3-netifaces tzdata; \
+    apk add --no-cache python3 py3-netifaces tzdata tini; \
     # Nothing in this image legitimately escalates privilege, so strip every
     # setuid/setgid bit. If the relay is ever compromised it then has no
     # in-image path back to root, which matters because this container is
@@ -118,8 +126,9 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/healthcheck.sh"]
 
-# Exec form, so start.sh is PID 1 and its `exec python3` inherits PID 1 —
-# SIGTERM then reaches the relay directly and `docker stop` is immediate
-# instead of waiting out the 10s kill timeout. Kept as CMD rather than
-# ENTRYPOINT so `docker run --rm -it <image> sh` still drops you to a shell.
+# tini is PID 1 and forwards signals to start.sh, which `exec`s python so the
+# relay is tini's direct child and dies on SIGTERM as normal. Keeping the relay
+# in CMD rather than folding it into ENTRYPOINT means `docker run --rm -it
+# <image> sh` still drops you to a shell (under tini) for debugging.
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/start.sh"]

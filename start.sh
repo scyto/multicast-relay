@@ -2,10 +2,11 @@
 #
 # Container entrypoint for multicast-relay.
 #
-# Runs as PID 1 and hands that PID straight to python via `exec`, so SIGTERM
-# from `docker stop` reaches the relay itself. Without the exec, the shell held
-# PID 1, swallowed the signal, and every stop waited out the full 10s kill
-# timeout before the container was killed.
+# Launched by tini (PID 1). The `exec` below matters: it replaces this shell
+# with python so the relay becomes tini's direct child, which is what lets tini
+# forward SIGTERM to it. Leave the shell in place and it sits between the two,
+# swallowing the signal, and every `docker stop` waits out the full timeout and
+# ends in a SIGKILL.
 set -eu
 
 if [ -z "${INTERFACES:-}" ]; then

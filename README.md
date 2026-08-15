@@ -119,7 +119,7 @@ sudo iptables -I INPUT -m pkttype --pkt-type multicast -j ACCEPT
   ```bash
   gh attestation verify oci://ghcr.io/scyto/multicast-relay:latest --repo scyto/multicast-relay
   ```
-- **Correct signal handling.** The relay is PID 1, so `docker stop` terminates it in about a second instead of waiting out the 10s kill timeout.
+- **Correct signal handling.** `tini` runs as PID 1 and forwards SIGTERM to the relay, so `docker stop` terminates it immediately instead of waiting out the 10s timeout and SIGKILLing it. The Linux kernel discards default-disposition signals aimed at PID 1, and `multicast-relay.py` installs no SIGTERM handler, so without an init process the relay simply ignores SIGTERM. CI asserts the container exits 143 (SIGTERM) rather than 137 (SIGKILL).
 
 ## Building and CI
 
