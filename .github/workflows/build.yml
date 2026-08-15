@@ -310,7 +310,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=multicast-relay
             org.opencontainers.image.description=mDNS/SSDP multicast relay for multi-homed hosts (UniFi Dream Machine and friends)
-            org.opencontainers.image.licenses=GPL-2.0-or-later
+            org.opencontainers.image.licenses=MIT AND GPL-3.0-only
 
       # ---------------------------------------------------------------------
       # Release immutability.
