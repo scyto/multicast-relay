@@ -483,12 +483,27 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
-      - name: Publish release
+      # Created as a draft, then published by a separate PATCH. A published
+      # release is frozen on an immutable-releases repo, so anything that
+      # creates-then-modifies fails; drafting first keeps every write before
+      # the freeze. Same approach as the sysext repos.
+      - name: Create draft release
+        id: release
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
           generate_release_notes: true
-          make_latest: 'true'
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REL_ID: ${{ steps.release.outputs.id }}
+        run: |
+          gh api --method PATCH "repos/${REPO}/releases/${REL_ID}" \
+            -F draft=false -f make_latest=true
+          echo "Published release ${REL_ID}"
