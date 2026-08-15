@@ -66,7 +66,7 @@ To override OPTS use the docker run option `-e OPTS="your options"` or `-e OPTS=
 
 ## Getting Running
 
-**NOTE if you are running this on unifios you will need to use the podman command instead of the docker command**
+> **UniFi OS users:** current UniFi OS ships Docker, so the `docker` commands below work as written. Older UniFi OS releases shipped `podman` instead — on those, substitute `podman` for `docker` in every command on this page.
 
 To get started this is the minimum number of options. This assumes your LAN is BR0 (VLAN null / 1) and your IoT network is VLAN #50:
 
