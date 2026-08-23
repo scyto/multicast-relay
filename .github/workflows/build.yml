@@ -116,14 +116,20 @@ jobs:
             exit 1
           }
 
-          # All four relays must come up, not just the process.
+          # All four relays must come up, not just the process. Capture the
+          # log once instead of re-running `docker logs` per pattern: `grep -q`
+          # exits the moment it matches, and the SIGPIPE that hands `docker
+          # logs` (141) fails the whole pipeline under `pipefail` even though
+          # the line was found. Whichever pattern matched early in the log lost
+          # that race intermittently.
+          logs=$(docker logs relay 2>&1)
           for expect in \
             'multicast relay for 224.0.0.251:5353' \
             'multicast relay for 239.255.255.250:1900' \
             'broadcast relay for 255.255.255.255:1900' \
             'broadcast relay for 255.255.255.255:6969'
           do
-            if docker logs relay 2>&1 | grep -qF "$expect"; then
+            if grep -qF "$expect" <<<"$logs"; then
               echo "  ok: $expect"
             else
               echo "::error title=smoke::relay never announced: $expect" >&2
