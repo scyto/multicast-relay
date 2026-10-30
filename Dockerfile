@@ -17,7 +17,7 @@
 # UPSTREAM_REF and the checksums live in .github/tracked-versions.json and are
 # bumped together by .github/workflows/check-upstream.yml.
 # ---------------------------------------------------------------------------
-FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS source
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS source
 
 ARG UPSTREAM_REPO=alsmith/multicast-relay
 ARG UPSTREAM_REF=461d1c97f3aaf0ab9f8996e1a8f24c6b8204d6b4
@@ -50,7 +50,7 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime.
 # ---------------------------------------------------------------------------
-FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS runtime
 
 ARG UPSTREAM_REPO=alsmith/multicast-relay
 ARG UPSTREAM_REF=461d1c97f3aaf0ab9f8996e1a8f24c6b8204d6b4
